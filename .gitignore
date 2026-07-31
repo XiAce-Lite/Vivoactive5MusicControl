@@ -1,0 +1,15 @@
+tools/*.zip
+tools/*.vsix
+tools/sdk-extract*/
+tools/sdk-manager/
+*.prg
+*.iq
+*.prg.debug.xml
+bin/
+gen/
+android/.gradle/
+android/**/build/
+android/local.properties
+*.apk
+*.ap_
+sim-capture.png

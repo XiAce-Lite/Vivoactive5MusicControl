@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MusicCtrl Companion</string>
+    <string name="status_idle">待機中 — サービス開始で時計と連携</string>
+    <string name="status_running">連携サービス稼働中</string>
+    <string name="btn_start">サービス開始</string>
+    <string name="btn_stop">サービス停止</string>
+    <string name="btn_refresh">再スキャン</string>
+    <string name="btn_open_watch">時計アプリ起動</string>
+    <string name="btn_test_pa">PA再生テスト</string>
+    <string name="btn_push">状態を時計へ</string>
+    <string name="watch_app_id">a6c98919-2956-452a-a02b-592d01fbb039</string>
+    <string name="hint">ログの「knownDevices=0」は時計未検出です。Garmin Connect で接続を確認。「時計→携帯(受信)」が出れば連動成功です。</string>
+</resources>
