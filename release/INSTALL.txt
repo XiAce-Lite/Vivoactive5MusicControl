@@ -1,0 +1,28 @@
+MusicCtrl サイドロード手順（横着向け）
+========================================
+
+必要なもの
+- Garmin Vivoactive 5
+- Android スマホ（PowerAMP インストール済み）
+- Garmin Connect Mobile（起動・ペアリング済み）
+- USB ケーブル（時計へ .prg を入れるとき）
+
+1. Android
+   - MusicCtrlCompanion.apk をスマホに送り、インストール
+   - 「提供元不明のアプリ」許可が必要な場合あり
+   - アプリを開き、通知の許可 → サービス開始（通知が出れば OK）
+
+2. 時計
+   - 時計を USB で PC に接続（マスストレージ）
+   - MusicCtrl.prg を 時計ドライブの GARMIN\APPS\ にコピー
+   - 安全に取り外し、アプリ一覧から MusicCtrl を起動
+
+3. 使う
+   - PowerAMP で再生
+   - Garmin Connect Mobile を裏で起動したまま
+   - 時計の MusicCtrl で再生／送り／音量
+
+うまくいかないとき
+- コンパニオンのログに「HTTP待ち受け」「Connect IQ SDK 準備完了」が出るか確認
+- 時計アプリをいったん終了して開き直す
+- Garmin Connect / コンパニオンを再起動

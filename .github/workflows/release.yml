@@ -1,0 +1,101 @@
+# Release — tag v* で APK をビルドし GitHub Release を作成
+#
+# 時計の .prg は Connect IQ SDK + 開発者キーが必要なため、CI ではビルドしない。
+# フル Zip（APK+PRG）は scripts/make-sideload-zip.ps1 で作り、
+#   gh release upload <tag> dist/MusicCtrl-sideload-*.zip --clobber
+# で同じ Release に追加できる。
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "既存タグ名（例: v0.1.0）。空なら ref のタグを使用"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  android-release:
+    name: Build APK and publish release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Grant gradlew
+        working-directory: android
+        run: chmod +x gradlew
+
+      - name: Assemble debug
+        working-directory: android
+        run: ./gradlew :app:assembleDebug --no-daemon
+
+      - name: Resolve version / tag
+        id: ver
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="v0.0.0-dev"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Package APK zip
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp android/app/build/outputs/apk/debug/app-debug.apk dist/MusicCtrlCompanion.apk
+          cp release/INSTALL.txt dist/INSTALL.txt
+          cd dist
+          zip -9 "MusicCtrl-android-${{ steps.ver.outputs.version }}.zip" MusicCtrlCompanion.apk INSTALL.txt
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG="${{ steps.ver.outputs.tag }}"
+          ZIP="dist/MusicCtrl-android-${{ steps.ver.outputs.version }}.zip"
+          APK="dist/MusicCtrlCompanion.apk"
+          NOTES="$(cat <<'EOF'
+          ## MusicCtrl サイドロード用ビルド
+
+          ### この Release の Android 成果物
+          - `MusicCtrlCompanion.apk` / `MusicCtrl-android-*.zip`
+
+          ### 時計アプリ (`.prg`)
+          Connect IQ のビルドには開発者キーが必要なため、CI では含めません。
+          フルセット（APK + PRG）は `MusicCtrl-sideload-*.zip` がある場合はそちらを使ってください。
+          無い場合は README の手順でローカルビルドするか、メンテナがアップロードした sideload Zip を待ってください。
+
+          ### 使い方（要約）
+          1. APK を Android にインストール
+          2. PRG を時計の `GARMIN/APPS/` にコピー
+          3. Garmin Connect Mobile を起動・ペアリング
+          4. PowerAMP で再生し、コンパニオンのサービスを開始
+          EOF
+          )"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ZIP" "$APK" --clobber
+          else
+            gh release create "$TAG" "$ZIP" "$APK" \
+              --title "MusicCtrl ${{ steps.ver.outputs.version }}" \
+              --notes "$NOTES"
+          fi

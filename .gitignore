@@ -13,3 +13,4 @@ android/local.properties
 *.apk
 *.ap_
 sim-capture.png
+dist/
