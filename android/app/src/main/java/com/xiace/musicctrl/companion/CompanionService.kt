@@ -73,10 +73,9 @@ class CompanionService : Service() {
     private val progressTicker = object : Runnable {
         override fun run() {
             if (playing) {
-                positionSec = currentPositionSec()
+                // PowerAMP is the source of truth for progress. Poll for a fresh
+                // position snapshot, and only forward actual position updates.
                 PowerampController.requestPosSync(this@CompanionService)
-                // Regular 1Hz state push (TPOS itself does not push — avoids BLE flood)
-                pushStateToWatch()
             }
             handler.postDelayed(this, 1000)
         }
@@ -395,6 +394,16 @@ class CompanionService : Service() {
         val isStatus = action.contains("STATUS_CHANGED")
         val nowUp = SystemClock.uptimeMillis()
 
+        // Debug: log every intent so we can see if PowerAMP is firing TRACK_CHANGED at all
+        if (isTrackChanged || isTpos) {
+            val dbgTitle = intent.getStringExtra("title")
+                ?: intent.getBundleExtra(PowerampStatusReceiver.EXTRA_TRACK)?.getString("title")
+                ?: "?"
+            val dbgId = intent.getLongExtra("realId", intent.getLongExtra("id", -1L))
+            val dbgPos = if (intent.hasExtra("pos")) intent.getIntExtra("pos", -1) else -1
+            StatusBus.log("PA受信 $action title=$dbgTitle id=$dbgId pos=$dbgPos")
+        }
+
         if (isTpos) {
             if (!allowPosition || !intent.hasExtra("pos")) return
             val newPos = parsePosSec(intent.getIntExtra("pos", -1))
@@ -402,10 +411,14 @@ class CompanionService : Service() {
             val before = currentPositionSec()
             if (nowUp < expectNewTrackUntilMs && before <= 2 && newPos > 5) return
             armClock(newPos)
-            val jumped = kotlin.math.abs(newPos - before) >= 2
-            if (jumped) {
-                StatusBus.log("TPOS/シーク: $before → $newPos")
-                // Seek only — regular progress is sent by the 1Hz ticker
+            if (newPos != positionSec) {
+                positionSec = newPos
+            }
+            val changed = newPos != before
+            if (changed) {
+                if (kotlin.math.abs(newPos - before) >= 2) {
+                    StatusBus.log("TPOS/シーク: $before → $newPos")
+                }
                 if (push) pushStateToWatchNow()
             }
             return
@@ -465,6 +478,7 @@ class CompanionService : Service() {
         val artistChanging = newArtist != null && newArtist != artist
         val idChanging = trackId > 0 && trackId != lastTrackId
         val expectingNew = nowUp < expectNewTrackUntilMs
+        val trackBoundary = isTrackChanged || idChanging || titleChanging
 
         val durMs = intent.getIntExtra("durMs", track?.getInt("durMs", -1) ?: -1)
         if (durMs > 0) {
@@ -478,6 +492,17 @@ class CompanionService : Service() {
         val contentChanged = titleChanging || artistChanging || idChanging
         // isTrackChanged alone is not enough — PowerAMP often sends TRACK_CHANGED + _EXPLICIT
         val shouldAnnounce = contentChanged || (isTrackChanged && expectingNew)
+
+        if (isTrackChanged) {
+            StatusBus.log("TRACK_CHANGED判定: title変=$titleChanging artist変=$artistChanging id変=$idChanging expecting=$expectingNew → announce=$shouldAnnounce (cur=$title/$lastTrackId → new=${newTitle}/$trackId)")
+        }
+
+        // Natural auto-next can arrive as TRACK_CHANGED before fresh pos lands.
+        // Reset the progress clock immediately so the watch does not keep waiting
+        // for the previous song to reach its old end position.
+        if (trackBoundary) {
+            armClock(0)
+        }
 
         if (newTitle != null && (isTrackChanged || titleChanging)) {
             title = newTitle
@@ -493,9 +518,6 @@ class CompanionService : Service() {
             expectNewTrackUntilMs = 0
             metaGuardUntilMs = nowUp + 4000L
             lastLiveMetaUptimeMs = nowUp
-            if (isTrackChanged || idChanging || titleChanging) {
-                armClock(0)
-            }
             StatusBus.log("曲情報: $artist / $title id=$lastTrackId pos=$positionSec/$durationSec play=$playing")
             if (push) {
                 pushMetaToWatch(if (isTrackChanged) "TRACK_CHANGED" else "meta")
@@ -505,8 +527,11 @@ class CompanionService : Service() {
             return
         }
 
-        // Duplicate TRACK_CHANGED_EXPLICIT with same meta — ignore
+        // Duplicate TRACK_CHANGED_EXPLICIT with same meta — ignore, but keep the
+        // just-reset progress and ask for a fresh position snapshot.
         if (isTrackChanged) {
+            PowerampController.requestPosSync(this)
+            if (push) pushStateToWatchNow()
             return
         }
 

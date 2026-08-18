@@ -50,17 +50,35 @@ class MusicControlView extends WatchUi.View {
         var needDraw = false;
         if (app.usesPhoneMeta()) {
             var now = System.getTimer();
+            var title = app.getTitle();
+            if (!title.equals(_lastTitle)) {
+                _lastTitle = title;
+                _marqueeOffset = 0;
+                _positionSec = app.getPositionSec();
+                needDraw = true;
+            }
             var phonePos = app.getPositionSec();
             var wasPlaying = _playing;
             if (now >= _playHoldUntil) {
                 _playing = app.isPlaying();
             }
-            // Phone is sole progress source — no local +1 (that fought phone pushes)
-            if (phonePos != _positionSec) {
+            // Keep the UI moving locally so delayed phone updates do not look hung.
+            // Accept only forward corrections from the phone during playback.
+            // Track resets are handled explicitly when the title changes or the
+            // user presses prev/next on the watch.
+            if (phonePos > _positionSec + 1) {
                 _positionSec = phonePos;
                 needDraw = true;
             }
             if (wasPlaying != _playing) {
+                needDraw = true;
+            }
+            if (_playing && (_tickCount % 4) == 0) {
+                _positionSec += 1;
+                var duration = app.getDurationSec();
+                if (duration > 0 && _positionSec > duration) {
+                    _positionSec = duration;
+                }
                 needDraw = true;
             }
         } else if (_playing && (_tickCount % 4) == 0) {
@@ -137,10 +155,6 @@ class MusicControlView extends WatchUi.View {
         var artistFont = Graphics.FONT_XTINY;
         var y = clockY + dc.getFontHeight(clockFont) + 2;
         var title = app.getTitle();
-        if (!title.equals(_lastTitle)) {
-            _lastTitle = title;
-            _marqueeOffset = 0;
-        }
         var titleAreaW = (w * 0.72).toNumber();
         drawMarqueeTitle(dc, title, titleFont, cx, y, titleAreaW);
         y += dc.getFontHeight(titleFont) + LINE_GAP;

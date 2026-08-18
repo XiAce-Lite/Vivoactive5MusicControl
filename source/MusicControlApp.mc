@@ -79,6 +79,7 @@ class MusicControlApp extends Application.AppBase {
             var newTitle = ti.toString();
             if (!newTitle.equals(_title)) {
                 _title = newTitle;
+                _positionSec = 0;
                 if (!newTitle.equals("...")) {
                     _skipHoldUntil = 0;
                     hold = false;
@@ -87,7 +88,13 @@ class MusicControlApp extends Application.AppBase {
         }
         var ar = dict.get("ar");
         if (ar != null) {
-            _artist = ar.toString();
+            var newArtist = ar.toString();
+            if (!newArtist.equals(_artist)) {
+                _artist = newArtist;
+                if (ti == null) {
+                    _positionSec = 0;
+                }
+            }
         }
         var pos = dict.get("pos");
         if (pos != null) {
