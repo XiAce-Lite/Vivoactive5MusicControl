@@ -36,6 +36,8 @@ class MusicControlView extends WatchUi.View {
         _uiTimer = new Timer.Timer();
         // 250ms: marquee + (every 4 ticks) track progress when playing
         _uiTimer.start(method(:onTimer), 250, true);
+        // Phone only pushes on change; ask for current state so play/pause is right on open.
+        PhoneBridge.sendCommand("sync");
     }
 
     function onHide() as Void {
@@ -204,6 +206,25 @@ class MusicControlView extends WatchUi.View {
         var volX = (w * 0.30).toNumber() - volSize / 2;
         volRect = [volX, volY, volX + volSize, volY + volSize] as Array<Number>;
         drawVolumeIcon(dc, volRect);
+        drawPhoneBattery(dc, cx, volY, volSize);
+    }
+
+    //! Phone battery, same row as volume, just right of center. Not a hit target.
+    private function drawPhoneBattery(dc as Dc, cx as Number, volY as Number, volSize as Number) as Void {
+        if (!getApp().usesPhoneMeta()) {
+            return;
+        }
+        var pct = getApp().getBatteryPercent();
+        if (pct < 0) {
+            return;
+        }
+        var font = Graphics.FONT_XTINY;
+        var text = pct.format("%d") + "%";
+        var fontH = dc.getFontHeight(font);
+        var textY = volY + (volSize - fontH) / 2;
+        var textX = cx + (dc.getWidth() * 0.08).toNumber();
+        dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(textX, textY, font, text, Graphics.TEXT_JUSTIFY_LEFT);
     }
 
     private function drawMarqueeTitle(dc as Dc, title as String, font as FontDefinition, cx as Number, y as Number, maxW as Number) as Void {

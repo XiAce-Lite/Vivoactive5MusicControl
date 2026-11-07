@@ -14,10 +14,14 @@ object Protocol {
     const val KEY_DUR = "dur"
     /** Increments on title/artist/track change so watch must apply meta. */
     const val KEY_META_GEN = "mg"
+    /** Phone battery percent, 0–100. */
+    const val KEY_BATTERY = "bat"
     const val KEY_STATE_TYPE = "st"
 
     const val CMD_TOGGLE = "toggle"
     const val CMD_NEXT = "next"
     const val CMD_PREV = "prev"
     const val CMD_VOL = "vol"
+    /** Watch asks the phone to resend the current state (e.g. on screen show). */
+    const val CMD_SYNC = "sync"
 }

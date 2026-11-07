@@ -22,6 +22,7 @@ class PowerampStatusReceiver : BroadcastReceiver() {
 
         const val EXTRA_STATE = "state"
         const val EXTRA_TRACK = "track"
+        const val STATE_STOPPED = 0
         const val STATE_PLAYING = 1
         const val STATE_PAUSED = 2
 

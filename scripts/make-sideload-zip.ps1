@@ -1,10 +1,10 @@
 # サイドロード用 Zip を dist/ に作る（APK + PRG + INSTALL.txt）
 # 使い方（リポジトリルートで）:
 #   .\scripts\make-sideload-zip.ps1
-#   .\scripts\make-sideload-zip.ps1 -Version 0.1.1 -SkipBuild
+#   .\scripts\make-sideload-zip.ps1 -Version 0.1.2 -SkipBuild
 
 param(
-    [string]$Version = "0.1.1",
+    [string]$Version = "0.1.2",
     [switch]$SkipBuild
 )
 

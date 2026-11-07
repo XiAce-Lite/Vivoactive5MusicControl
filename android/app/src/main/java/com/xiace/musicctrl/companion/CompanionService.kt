@@ -9,6 +9,10 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -59,6 +63,24 @@ class CompanionService : Service() {
     private var lastCmdAtMs = 0L
     private var powerampReceiverRegistered = false
     private var httpServer: LocalCommandServer? = null
+    private var batteryCheckCount = 0
+    private var lastPushedBattery = -1
+    private var playCheckCount = 0
+    private var playMismatchCount = 0
+    private var lastTransportCmdAtMs = 0L
+    private var reconcileGeneration = 0
+    private lateinit var audioManager: AudioManager
+
+    /** Headphone connect/disconnect: PowerAMP may auto-resume/pause before we hear about it. */
+    private val audioDeviceCallback = object : AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) {
+            if (added.any { isHeadphone(it) }) scheduleReconcileBurst("イヤホン接続")
+        }
+
+        override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) {
+            if (removed.any { isHeadphone(it) }) scheduleReconcileBurst("イヤホン切断")
+        }
+    }
 
     /**
      * Dynamic receiver required: TPOS_SYNC is non-sticky and Android 8+ often
@@ -76,6 +98,19 @@ class CompanionService : Service() {
                 // PowerAMP is the source of truth for progress. Poll for a fresh
                 // position snapshot, and only forward actual position updates.
                 PowerampController.requestPosSync(this@CompanionService)
+            }
+            playCheckCount += 1
+            if (playCheckCount >= 5) {
+                playCheckCount = 0
+                reconcilePlayState("定期確認", immediate = false, forcePush = false)
+            }
+            batteryCheckCount += 1
+            if (batteryCheckCount >= 30) {
+                batteryCheckCount = 0
+                val bat = phoneBatteryPercent()
+                if (bat >= 0 && bat != lastPushedBattery) {
+                    pushStateToWatch()
+                }
             }
             handler.postDelayed(this, 1000)
         }
@@ -121,6 +156,7 @@ class CompanionService : Service() {
         createChannel()
         startForeground(NOTIF_ID, buildNotification(getString(R.string.status_running)))
         StatusBus.log("サービス開始")
+        audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
         registerPowerampReceiver()
         httpServer = LocalCommandServer { cmd, vol ->
             handler.post { runWatchCommand(cmd, vol, "http") }
@@ -138,6 +174,9 @@ class CompanionService : Service() {
             PowerampController.requestPosSync(this)
             pushStateToWatch()
         }, 500)
+        // Also fires once on registration with already-connected devices.
+        audioManager.registerAudioDeviceCallback(audioDeviceCallback, handler)
+        scheduleReconcileBurst("起動")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -160,6 +199,7 @@ class CompanionService : Service() {
     override fun onDestroy() {
         handler.removeCallbacks(refreshRunnable)
         handler.removeCallbacks(progressTicker)
+        audioManager.unregisterAudioDeviceCallback(audioDeviceCallback)
         unregisterPowerampReceiver()
         httpServer?.stop()
         httpServer = null
@@ -334,6 +374,9 @@ class CompanionService : Service() {
     private fun runWatchCommand(cmd: String, vol: Int?, source: String) {
         if (!acceptCommand(if (cmd == Protocol.CMD_VOL) "vol:$vol" else cmd)) return
         StatusBus.log("コマンド($source): $cmd" + if (vol != null) " v=$vol" else "")
+        if (cmd == Protocol.CMD_TOGGLE || cmd == Protocol.CMD_NEXT || cmd == Protocol.CMD_PREV) {
+            lastTransportCmdAtMs = SystemClock.uptimeMillis()
+        }
         when (cmd) {
             Protocol.CMD_TOGGLE -> {
                 if (playing) armClock(currentPositionSec())
@@ -353,7 +396,66 @@ class CompanionService : Service() {
                 if (vol != null) PowerampController.setVolumePercent(this, vol)
                 handler.postDelayed({ pushStateToWatch() }, 150)
             }
+            Protocol.CMD_SYNC -> reconcilePlayState("時計から同期要求", immediate = true, forcePush = true)
         }
+    }
+
+    private fun isHeadphone(d: AudioDeviceInfo): Boolean = when (d.type) {
+        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+        AudioDeviceInfo.TYPE_WIRED_HEADSET,
+        AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+        AudioDeviceInfo.TYPE_USB_HEADSET,
+        TYPE_BLE_HEADSET -> true
+        else -> false
+    }
+
+    /** PowerAMP may start/stop playback a few seconds after the trigger — check several times. */
+    private fun scheduleReconcileBurst(reason: String) {
+        StatusBus.log("再生状態の確認予約 ($reason)")
+        val gen = ++reconcileGeneration
+        listOf(1000L, 3000L, 6000L).forEach { delayMs ->
+            handler.postDelayed({
+                if (gen != reconcileGeneration) return@postDelayed
+                reconcilePlayState(reason, immediate = true, forcePush = false)
+            }, delayMs)
+        }
+    }
+
+    /**
+     * Re-read PowerAMP's last status, then cross-check with whether audio is actually
+     * playing. Events alone miss auto-resume (e.g. headphones connected while the
+     * service was not yet listening).
+     */
+    private fun reconcilePlayState(reason: String, immediate: Boolean, forcePush: Boolean) {
+        val before = playing
+        bootstrapFromSticky()
+        val now = SystemClock.uptimeMillis()
+        // Right after a watch command, PowerAMP/audio output can lag behind our own flag.
+        if (now - lastTransportCmdAtMs >= 3000L) {
+            val active = audioManager.isMusicActive
+            if (active != playing) {
+                playMismatchCount += 1
+                // Periodic checks need two misses in a row to avoid flapping on brief silence.
+                if (immediate || playMismatchCount >= 2) {
+                    setPlayingState(active)
+                    playMismatchCount = 0
+                }
+            } else {
+                playMismatchCount = 0
+            }
+        }
+        if (playing != before) {
+            StatusBus.log("再生状態を補正 ($reason): ${if (playing) "再生中" else "停止中"}")
+            if (playing) PowerampController.requestPosSync(this)
+        }
+        if (playing != before || forcePush) pushStateToWatchNow()
+    }
+
+    private fun setPlayingState(next: Boolean) {
+        if (playing == next) return
+        if (playing) armClock(currentPositionSec())
+        playing = next
+        if (playing) armClock(positionSec) else posClockArmed = false
     }
 
     private fun acceptCommand(key: String): Boolean {
@@ -433,7 +535,7 @@ class CompanionService : Service() {
             var nextPlaying = playing
             val state = intent.getIntExtra(PowerampStatusReceiver.EXTRA_STATE, -1)
             if (state == PowerampStatusReceiver.STATE_PLAYING) nextPlaying = true
-            else if (state == PowerampStatusReceiver.STATE_PAUSED) nextPlaying = false
+            else if (state == PowerampStatusReceiver.STATE_PAUSED || state == PowerampStatusReceiver.STATE_STOPPED) nextPlaying = false
             if (intent.hasExtra("paused")) {
                 nextPlaying = !intent.getBooleanExtra("paused", !nextPlaying)
             }
@@ -450,7 +552,7 @@ class CompanionService : Service() {
         var nextPlaying = playing
         val state = intent.getIntExtra(PowerampStatusReceiver.EXTRA_STATE, -1)
         if (state == PowerampStatusReceiver.STATE_PLAYING) nextPlaying = true
-        else if (state == PowerampStatusReceiver.STATE_PAUSED) nextPlaying = false
+        else if (state == PowerampStatusReceiver.STATE_PAUSED || state == PowerampStatusReceiver.STATE_STOPPED) nextPlaying = false
         if (intent.hasExtra("paused")) {
             nextPlaying = !intent.getBooleanExtra("paused", !nextPlaying)
         }
@@ -611,6 +713,15 @@ class CompanionService : Service() {
         return null
     }
 
+    /** Sticky battery broadcast. No extra permission. -1 if unavailable. */
+    private fun phoneBatteryPercent(): Int {
+        val battery = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)) ?: return -1
+        val level = battery.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+        val scale = battery.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+        if (level < 0 || scale <= 0) return -1
+        return (level * 100 / scale).coerceIn(0, 100)
+    }
+
     private fun pushStateToWatch() = pushStateToWatchNow()
 
     private fun pushStateToWatchNow() {
@@ -628,6 +739,11 @@ class CompanionService : Service() {
         payload[Protocol.KEY_DUR] = durationSec
         payload[Protocol.KEY_META_GEN] = metaGeneration
         payload[Protocol.KEY_VOL] = PowerampController.getVolumePercent(this)
+        val battery = phoneBatteryPercent()
+        if (battery >= 0) {
+            lastPushedBattery = battery
+            payload[Protocol.KEY_BATTERY] = battery
+        }
         devices.forEach { device ->
             try {
                 connectIQ.sendMessage(device, watchApp, payload) { _, _, status ->
@@ -672,6 +788,8 @@ class CompanionService : Service() {
     companion object {
         private const val CHANNEL_ID = "musicctrl"
         private const val NOTIF_ID = 42
+        /** AudioDeviceInfo.TYPE_BLE_HEADSET, added in API 31. */
+        private const val TYPE_BLE_HEADSET = 26
         const val ACTION_STOP = "com.xiace.musicctrl.companion.STOP"
         const val ACTION_PUSH_STATE = "com.xiace.musicctrl.companion.PUSH_STATE"
         const val ACTION_TEST_TOGGLE = "com.xiace.musicctrl.companion.TEST_TOGGLE"

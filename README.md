@@ -36,15 +36,15 @@ Garmin Vivoactive 5 向けカスタム音楽コントロール（Connect IQ）+ 
 ローカルでフル Zip（APK+PRG）を作る:
 
 ```powershell
-.\scripts\make-sideload-zip.ps1 -Version 0.1.1
+.\scripts\make-sideload-zip.ps1 -Version 0.1.2
 # 既存の dist\ 成果物だけで Zip する場合:
-.\scripts\make-sideload-zip.ps1 -Version 0.1.1 -SkipBuild
+.\scripts\make-sideload-zip.ps1 -Version 0.1.2 -SkipBuild
 ```
 
 Release に追加アップロードする例:
 
 ```powershell
-gh release upload v0.1.1 .\dist\MusicCtrl-sideload-0.1.1.zip --clobber
+gh release upload v0.1.2 .\dist\MusicCtrl-sideload-0.1.2.zip --clobber
 ```
 
 ## 時計ビルド（開発者）

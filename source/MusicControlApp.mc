@@ -16,6 +16,7 @@ class MusicControlApp extends Application.AppBase {
     private var _usePhoneMeta as Boolean = false;
     private var _skipHoldUntil as Number = 0;
     private var _metaGen as Number = -1;
+    private var _batteryPct as Number = -1;
 
     function initialize() {
         AppBase.initialize();
@@ -113,6 +114,16 @@ class MusicControlApp extends Application.AppBase {
         if (vol != null) {
             _volume = vol as Number;
         }
+        var bat = dict.get("bat");
+        if (bat != null) {
+            var pct = bat as Number;
+            if (pct < 0) {
+                pct = 0;
+            } else if (pct > 100) {
+                pct = 100;
+            }
+            _batteryPct = pct;
+        }
     }
 
     function markSkipPending() as Void {
@@ -163,6 +174,10 @@ class MusicControlApp extends Application.AppBase {
 
     function getVolume() as Number {
         return _volume;
+    }
+
+    function getBatteryPercent() as Number {
+        return _batteryPct;
     }
 
     function setVolume(value as Number) as Void {
